@@ -154,7 +154,7 @@ interface AdminUser {
   license_status?: string;
   plate_info?: string;
   is_expired: number;
-  lifecycle_status?: 'new_registered' | 'active' | 'expired';
+  lifecycle_status?: 'new_registered' | 'active' | 'expired' | 'unassigned';
 }
 
 interface RegistrationForm {
@@ -2176,7 +2176,7 @@ export default function App() {
   );
 
   const Admin = () => {
-    const workUsers = adminUsers.filter((u) => u.lifecycle_status === 'active');
+    const workUsers = adminUsers.filter((u) => u.lifecycle_status === 'active' && Boolean((u.license_number || '').trim()));
     const expiredUsers = adminUsers.filter((u) => u.lifecycle_status === 'expired');
     const newRegisteredUsers = adminUsers.filter((u) => u.lifecycle_status === 'new_registered');
     const editingUser = editingUserId ? adminUsers.find((u) => u.id === editingUserId) : null;

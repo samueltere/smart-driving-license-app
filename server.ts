@@ -683,6 +683,12 @@ app.get("/api/admin/users", (req, res) => {
       ) as latest_license_request_status,
       CASE 
         WHEN (u.license_number IS NULL OR u.license_number = '')
+          AND NOT EXISTS (
+            SELECT 1
+            FROM license_requests lr0
+            WHERE lr0.user_id = u.id
+          ) THEN 'unassigned'
+        WHEN (u.license_number IS NULL OR u.license_number = '')
           AND EXISTS (
             SELECT 1
             FROM license_requests lr2
