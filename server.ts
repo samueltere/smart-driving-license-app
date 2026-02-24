@@ -10,11 +10,13 @@ import nodemailer from "nodemailer";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const isVercel = Boolean(process.env.VERCEL);
 
 // Ensure uploads directory exists
-const uploadDir = path.join(__dirname, "uploads");
+const dataDir = isVercel ? "/tmp" : __dirname;
+const uploadDir = path.join(dataDir, "uploads");
 if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir);
+  fs.mkdirSync(uploadDir, { recursive: true });
 }
 
 const storage = multer.diskStorage({
@@ -46,7 +48,8 @@ const upload = multer({
   },
 });
 
-const db = new Database("hossana_driving.db");
+const dbPath = path.join(dataDir, "hossana_driving.db");
+const db = new Database(dbPath);
 const hasColumn = (tableName: string, columnName: string) => {
   const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
   return columns.some((c) => c.name === columnName);
@@ -1115,4 +1118,8 @@ async function startServer() {
   });
 }
 
-startServer();
+if (!isVercel) {
+  startServer();
+}
+
+export default app;
