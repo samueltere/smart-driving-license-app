@@ -245,6 +245,25 @@ const mailTransporter = smtpConfigured
     })
   : null;
 
+const getSmtpErrorMessage = (err: any) => {
+  const code = String(err?.code || "");
+  const responseCode = Number(err?.responseCode || 0);
+
+  if (code === "EAUTH" || responseCode === 535) {
+    return "SMTP authentication failed. Check SMTP_USER/SMTP_PASS (for Gmail use an App Password).";
+  }
+  if (code === "ESOCKET" || code === "ECONNECTION" || code === "ETIMEDOUT") {
+    return "Unable to connect to SMTP server. Check SMTP_HOST/SMTP_PORT/SMTP_SECURE.";
+  }
+  if (responseCode === 550 || responseCode === 553) {
+    return "SMTP rejected sender/recipient address (550/553). Verify SMTP_FROM and destination email.";
+  }
+  if (responseCode === 554) {
+    return "SMTP rejected message (554). Check provider policy or spam restrictions.";
+  }
+  return String(err?.message || "Unknown SMTP error.");
+};
+
 app.post("/api/otp/send", async (req, res) => {
   const { email } = req.body;
   if (!email) {
@@ -273,7 +292,7 @@ app.post("/api/otp/send", async (req, res) => {
     res.json({ success: true, message: "OTP sent to your email" });
   } catch (err: any) {
     console.error("Email delivery error:", err);
-    res.status(500).json({ error: "Failed to send email OTP. Check SMTP configuration." });
+    res.status(500).json({ error: `Failed to send email OTP. ${getSmtpErrorMessage(err)}` });
   }
 });
 
@@ -432,7 +451,8 @@ app.post("/api/password/forgot", async (req, res) => {
     });
     res.json({ success: true, message: "Verification code sent to your email." });
   } catch (err: any) {
-    res.status(500).json({ error: "Failed to send reset code." });
+    console.error("Password reset email error:", err);
+    res.status(500).json({ error: `Failed to send reset code. ${getSmtpErrorMessage(err)}` });
   }
 });
 
@@ -474,7 +494,8 @@ app.post("/api/contact", async (req, res) => {
     });
     res.json({ success: true, message: "Message sent successfully." });
   } catch (err: any) {
-    res.status(500).json({ error: "Failed to send message." });
+    console.error("Contact email error:", err);
+    res.status(500).json({ error: `Failed to send message. ${getSmtpErrorMessage(err)}` });
   }
 });
 
@@ -758,7 +779,8 @@ app.post("/api/admin/invites", async (req, res) => {
     });
     res.json({ success: true, invite_url: inviteUrl });
   } catch (err: any) {
-    res.status(500).json({ error: "Invite created but failed to send email." });
+    console.error("Invite email error:", err);
+    res.status(500).json({ error: `Invite created but failed to send email. ${getSmtpErrorMessage(err)}` });
   }
 });
 
@@ -1105,6 +1127,16 @@ app.use((err: any, req: any, res: any, next: any) => {
 app.use("/uploads", express.static(uploadDir));
 
 async function startServer() {
+  if (mailTransporter) {
+    try {
+      await mailTransporter.verify();
+      console.log("SMTP connection verified successfully.");
+    } catch (err: any) {
+      console.error("SMTP verify failed:", err);
+      console.error(`SMTP verify summary: ${getSmtpErrorMessage(err)}`);
+    }
+  }
+
   if (process.env.NODE_ENV !== "production") {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({

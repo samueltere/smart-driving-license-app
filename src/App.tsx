@@ -329,17 +329,40 @@ export default function App() {
     setRegForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  const normalizeApiErrorMessage = (raw: unknown, fallback = 'Request failed.') => {
+    const text = String(raw ?? '').trim();
+    if (!text) return fallback;
+    const looksLikeHtml = /<(?:!doctype|html|head|body)\b/i.test(text);
+    if (looksLikeHtml) {
+      return 'Service is temporarily unavailable. Please try again in a few minutes.';
+    }
+    return text.length > 240 ? `${text.slice(0, 240)}...` : text;
+  };
+
   const fetchJsonWithTimeout = async (url: string, options: RequestInit, timeoutMs = 20000) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await fetch(url, { ...options, signal: controller.signal });
+      const contentType = (res.headers.get('content-type') || '').toLowerCase();
       const raw = await res.text();
       let data: any = {};
-      try {
-        data = raw ? JSON.parse(raw) : {};
-      } catch {
-        data = { error: raw || "Unexpected server response." };
+
+      if (contentType.includes('application/json')) {
+        try {
+          data = raw ? JSON.parse(raw) : {};
+        } catch {
+          data = { error: 'Invalid JSON response from server.' };
+        }
+      } else {
+        data = { error: normalizeApiErrorMessage(raw, 'Unexpected server response.') };
+      }
+
+      if (!res.ok) {
+        data.error = normalizeApiErrorMessage(
+          data.error || raw,
+          `Request failed with status ${res.status}.`
+        );
       }
       return { res, data };
     } catch (err: any) {
@@ -974,7 +997,7 @@ export default function App() {
     setError('');
     setInfo('');
     try {
-      const res = await fetch('/api/password/reset', {
+      const { res, data } = await fetchJsonWithTimeout('/api/password/reset', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -983,7 +1006,6 @@ export default function App() {
           new_password: forgotForm.new_password,
         }),
       });
-      const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to reset password');
       setInfo(data.message || 'Password reset successful.');
       setForgotForm({ email: '', otp: '', new_password: '', step: 'send' });
