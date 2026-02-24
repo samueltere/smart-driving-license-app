@@ -217,17 +217,24 @@ const app = express();
 app.use(express.json());
 
 const PORT = Number(process.env.PORT || 3000);
+const appUrlRaw = (process.env.APP_URL || "").trim();
+const appUrl = /^https?:\/\//i.test(appUrlRaw) ? appUrlRaw : `http://localhost:${PORT}`;
 
 // Auth Endpoints
 const otps = new Map<string, string>();
 const passwordOtps = new Map<string, string>();
+
+const emailFrom = (process.env.SMTP_FROM || "").trim();
+const emailProvider = (process.env.EMAIL_PROVIDER || "").trim().toLowerCase();
+const brevoApiKey = (process.env.BREVO_API_KEY || "").trim();
+const brevoConfigured = (emailProvider === "brevo" || !!brevoApiKey) && !!brevoApiKey && !!emailFrom;
 
 const smtpConfigured = Boolean(
   process.env.SMTP_HOST &&
   process.env.SMTP_PORT &&
   process.env.SMTP_USER &&
   process.env.SMTP_PASS &&
-  process.env.SMTP_FROM
+  emailFrom
 );
 
 const mailTransporter = smtpConfigured
@@ -261,8 +268,64 @@ const getSmtpErrorMessage = (err: any) => {
   if (responseCode === 554) {
     return "SMTP rejected message (554). Check provider policy or spam restrictions.";
   }
+  if (code === "EENVELOPE") {
+    return "SMTP envelope rejected. Verify SMTP_FROM and recipient email.";
+  }
   return String(err?.message || "Unknown SMTP error.");
 };
+
+const getBrevoErrorMessage = (status: number, bodyText: string) => {
+  if (status === 401 || status === 403) {
+    return "Brevo API authentication failed. Check BREVO_API_KEY.";
+  }
+  if (status === 400) {
+    return "Brevo rejected payload. Verify sender address and recipient format.";
+  }
+  if (status === 429) {
+    return "Brevo rate limit reached. Please try again shortly.";
+  }
+  if (status >= 500) {
+    return "Brevo service is temporarily unavailable.";
+  }
+  const trimmed = String(bodyText || "").trim();
+  return trimmed || `Brevo API error (HTTP ${status}).`;
+};
+
+const sendEmail = async (to: string, subject: string, text: string) => {
+  if (brevoConfigured) {
+    const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "api-key": brevoApiKey,
+      },
+      body: JSON.stringify({
+        sender: { email: emailFrom, name: "Hossana DL" },
+        to: [{ email: to }],
+        subject,
+        textContent: text,
+      }),
+    });
+    if (!res.ok) {
+      const bodyText = await res.text();
+      throw new Error(getBrevoErrorMessage(res.status, bodyText));
+    }
+    return;
+  }
+
+  if (!mailTransporter) {
+    throw new Error("Email service is not configured.");
+  }
+
+  await mailTransporter.sendMail({
+    from: emailFrom,
+    to,
+    subject,
+    text,
+  });
+};
+
+const emailConfigured = brevoConfigured || !!mailTransporter;
 
 app.post("/api/otp/send", async (req, res) => {
   const { email } = req.body;
@@ -273,9 +336,9 @@ app.post("/api/otp/send", async (req, res) => {
   if (!emailPattern.test(email)) {
     return res.status(400).json({ error: "Please enter a valid email address." });
   }
-  if (!mailTransporter) {
+  if (!emailConfigured) {
     return res.status(503).json({
-      error: "Email OTP is not configured on server. Add SMTP settings in .env and restart.",
+      error: "Email service is not configured. Configure Brevo API or SMTP settings.",
     });
   }
 
@@ -283,16 +346,15 @@ app.post("/api/otp/send", async (req, res) => {
   otps.set(email, otp);
 
   try {
-    await mailTransporter.sendMail({
-      from: process.env.SMTP_FROM,
-      to: email,
-      subject: "Your Hossana verification code",
-      text: `Your Hossana Driving License verification code is: ${otp}`,
-    });
+    await sendEmail(
+      email,
+      "Your Hossana verification code",
+      `Your Hossana Driving License verification code is: ${otp}`
+    );
     res.json({ success: true, message: "OTP sent to your email" });
   } catch (err: any) {
     console.error("Email delivery error:", err);
-    res.status(500).json({ error: `Failed to send email OTP. ${getSmtpErrorMessage(err)}` });
+    res.status(500).json({ error: `Failed to send email OTP. ${String(err?.message || getSmtpErrorMessage(err))}` });
   }
 });
 
@@ -437,22 +499,17 @@ app.post("/api/password/forgot", async (req, res) => {
   if (!user) {
     return res.status(404).json({ error: "No account found with this email." });
   }
-  if (!mailTransporter) {
+  if (!emailConfigured) {
     return res.status(503).json({ error: "Email service is not configured." });
   }
   const otp = Math.floor(1000 + Math.random() * 9000).toString();
   passwordOtps.set(email, otp);
   try {
-    await mailTransporter.sendMail({
-      from: process.env.SMTP_FROM,
-      to: email,
-      subject: "Password reset verification code",
-      text: `Your password reset code is: ${otp}`,
-    });
+    await sendEmail(email, "Password reset verification code", `Your password reset code is: ${otp}`);
     res.json({ success: true, message: "Verification code sent to your email." });
   } catch (err: any) {
     console.error("Password reset email error:", err);
-    res.status(500).json({ error: `Failed to send reset code. ${getSmtpErrorMessage(err)}` });
+    res.status(500).json({ error: `Failed to send reset code. ${String(err?.message || getSmtpErrorMessage(err))}` });
   }
 });
 
@@ -474,28 +531,27 @@ app.post("/api/contact", async (req, res) => {
   if (!name || !phone || !email || !body) {
     return res.status(400).json({ error: "Name, phone, email, and message are required." });
   }
-  if (!mailTransporter || !process.env.SMTP_FROM) {
+  if (!emailConfigured || !emailFrom) {
     return res.status(503).json({ error: "Email service is not configured." });
   }
 
   try {
-    await mailTransporter.sendMail({
-      from: process.env.SMTP_FROM,
-      to: process.env.SMTP_FROM,
-      subject: `Contact Message - Hossana DL (${name})`,
-      text: [
+    await sendEmail(
+      emailFrom,
+      `Contact Message - Hossana DL (${name})`,
+      [
         `Name: ${name}`,
         `Phone: ${phone}`,
         `Email: ${email}`,
         "",
         "Message:",
         body,
-      ].join("\n"),
-    });
+      ].join("\n")
+    );
     res.json({ success: true, message: "Message sent successfully." });
   } catch (err: any) {
     console.error("Contact email error:", err);
-    res.status(500).json({ error: `Failed to send message. ${getSmtpErrorMessage(err)}` });
+    res.status(500).json({ error: `Failed to send message. ${String(err?.message || getSmtpErrorMessage(err))}` });
   }
 });
 
@@ -756,7 +812,7 @@ app.post("/api/admin/invites", async (req, res) => {
   if (!email) {
     return res.status(400).json({ error: "Invite email is required." });
   }
-  if (!mailTransporter) {
+  if (!emailConfigured) {
     return res.status(503).json({ error: "Email service is not configured." });
   }
   const token = `inv_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
@@ -767,20 +823,18 @@ app.post("/api/admin/invites", async (req, res) => {
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(token, full_name || null, null, email, null, safeRole, created_by || null);
 
-  const baseUrl = process.env.APP_URL || `http://localhost:${PORT}`;
-  const inviteUrl = `${baseUrl}?invite=${token}`;
+  const inviteUrl = `${appUrl}?invite=${token}`;
 
   try {
-    await mailTransporter.sendMail({
-      from: process.env.SMTP_FROM,
-      to: email,
-      subject: `You are invited to Hossana DL (${safeRole})`,
-      text: `You were invited as ${safeRole}. Open this link to complete registration: ${inviteUrl}`,
-    });
+    await sendEmail(
+      email,
+      `You are invited to Hossana DL (${safeRole})`,
+      `You were invited as ${safeRole}. Open this link to complete registration: ${inviteUrl}`
+    );
     res.json({ success: true, invite_url: inviteUrl });
   } catch (err: any) {
     console.error("Invite email error:", err);
-    res.status(500).json({ error: `Invite created but failed to send email. ${getSmtpErrorMessage(err)}` });
+    res.status(500).json({ error: `Invite created but failed to send email. ${String(err?.message || getSmtpErrorMessage(err))}` });
   }
 });
 
@@ -1127,7 +1181,9 @@ app.use((err: any, req: any, res: any, next: any) => {
 app.use("/uploads", express.static(uploadDir));
 
 async function startServer() {
-  if (mailTransporter) {
+  if (brevoConfigured) {
+    console.log("Email provider: Brevo HTTP API");
+  } else if (mailTransporter) {
     try {
       await mailTransporter.verify();
       console.log("SMTP connection verified successfully.");
@@ -1135,6 +1191,16 @@ async function startServer() {
       console.error("SMTP verify failed:", err);
       console.error(`SMTP verify summary: ${getSmtpErrorMessage(err)}`);
     }
+  } else {
+    console.log("Email provider: not configured");
+  }
+
+  if (isVercel === false && process.env.RENDER && mailTransporter && !brevoConfigured) {
+    console.log("Notice: On Render free web services, outbound SMTP ports may be blocked. Prefer Brevo HTTP API.");
+  }
+
+  if (appUrlRaw && !/^https?:\/\//i.test(appUrlRaw)) {
+    console.log(`APP_URL is invalid (${appUrlRaw}). Falling back to ${appUrl}`);
   }
 
   if (process.env.NODE_ENV !== "production") {
@@ -1153,10 +1219,13 @@ async function startServer() {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
-    console.log(`SMTP configured: ${smtpConfigured ? "yes" : "no"}`);
-    if (!smtpConfigured) {
-      console.log("Set SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS, SMTP_FROM in .env");
+    console.log(`Email configured: ${emailConfigured ? "yes" : "no"}`);
+    if (!emailConfigured) {
+      console.log("Configure one of:");
+      console.log("- Brevo API: EMAIL_PROVIDER=brevo, BREVO_API_KEY, SMTP_FROM");
+      console.log("- SMTP: SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS, SMTP_FROM");
     }
+    console.log(`APP_URL in use: ${appUrl}`);
   });
 }
 
