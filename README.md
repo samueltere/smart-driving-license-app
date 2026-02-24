@@ -35,6 +35,7 @@ This project includes [`render.yaml`](./render.yaml) for one-click setup.
 Important:
 - Database file is stored at `/var/data/hossana_driving.db` (persistent).
 - Uploaded files are stored at `/var/data/uploads` (persistent).
+- Render persistent disk requires a paid web plan (e.g. Starter).
 
 ## Why Vercel Fails for Persistence
 
