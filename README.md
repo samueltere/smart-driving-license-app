@@ -1,20 +1,41 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Hossana Driving License Services
 
-# Run and deploy your AI Studio app
+Full-stack app (React + Express + SQLite) for registration, OTP verification, license updates, and admin workflows.
 
-This contains everything you need to run your app locally.
-
-View your app in AI Studio: https://ai.studio/apps/ba2cc782-72b8-49f1-aa10-72b08550b7b0
-
-## Run Locally
-
-**Prerequisites:**  Node.js
-
+## Local Run
 
 1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+   - `npm install`
+2. Configure environment:
+   - copy `.env.example` to `.env`
+   - fill SMTP values
+3. Start app:
+   - `npm run dev`
+4. Open:
+   - `http://localhost:3000`
+
+## Render Deployment (Persistent Database)
+
+This project includes [`render.yaml`](./render.yaml) for one-click setup.
+
+1. Push this repo to GitHub.
+2. In Render, create **New > Blueprint** and select this repo.
+3. Render will create:
+   - a Node web service
+   - a persistent disk mounted at `/var/data`
+4. Set required environment variables in Render:
+   - `APP_URL` (your Render URL, e.g. `https://your-service.onrender.com`)
+   - `SMTP_HOST`
+   - `SMTP_PORT`
+   - `SMTP_SECURE`
+   - `SMTP_USER`
+   - `SMTP_PASS`
+   - `SMTP_FROM`
+
+Important:
+- Database file is stored at `/var/data/hossana_driving.db` (persistent).
+- Uploaded files are stored at `/var/data/uploads` (persistent).
+
+## Why Vercel Fails for Persistence
+
+Vercel serverless runtime uses ephemeral filesystem. SQLite and uploaded files are not reliably persistent across requests, so registration/admin data can disappear.

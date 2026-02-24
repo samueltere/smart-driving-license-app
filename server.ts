@@ -12,7 +12,8 @@ const __dirname = path.dirname(__filename);
 const isVercel = Boolean(process.env.VERCEL);
 
 // Ensure uploads directory exists
-const dataDir = isVercel ? "/tmp" : __dirname;
+const configuredDataDir = (process.env.DATA_DIR || "").trim();
+const dataDir = configuredDataDir || (isVercel ? "/tmp" : __dirname);
 const uploadDir = path.join(dataDir, "uploads");
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -215,7 +216,7 @@ seedAdmin.run("Admin User", "admin@hossana.local", "0900000000", "ADMIN-001", "A
 const app = express();
 app.use(express.json());
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT || 3000);
 
 // Auth Endpoints
 const otps = new Map<string, string>();
