@@ -2,14 +2,12 @@ services:
   - type: web
     name: hossana-driving-license-services
     runtime: node
-    plan: starter
+    plan: free
     buildCommand: npm install && npm run build
     startCommand: npx tsx server.ts
     envVars:
       - key: NODE_ENV
         value: production
-      - key: DATA_DIR
-        value: /var/data
       - key: APP_URL
         sync: false
       - key: SMTP_HOST
@@ -24,7 +22,3 @@ services:
         sync: false
       - key: SMTP_FROM
         sync: false
-    disk:
-      name: hossana-data
-      mountPath: /var/data
-      sizeGB: 1

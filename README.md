@@ -22,7 +22,6 @@ This project includes [`render.yaml`](./render.yaml) for one-click setup.
 2. In Render, create **New > Blueprint** and select this repo.
 3. Render will create:
    - a Node web service
-   - a persistent disk mounted at `/var/data`
 4. Set required environment variables in Render:
    - `APP_URL` (your Render URL, e.g. `https://your-service.onrender.com`)
    - `SMTP_HOST`
@@ -33,9 +32,8 @@ This project includes [`render.yaml`](./render.yaml) for one-click setup.
    - `SMTP_FROM`
 
 Important:
-- Database file is stored at `/var/data/hossana_driving.db` (persistent).
-- Uploaded files are stored at `/var/data/uploads` (persistent).
-- Render persistent disk requires a paid web plan (e.g. Starter).
+- On free plan, SQLite/uploads are not persistent across restarts.
+- For persistent database/files, use a paid plan with disk or migrate to managed DB + object storage.
 
 ## Why Vercel Fails for Persistence
 
