@@ -329,6 +329,29 @@ export default function App() {
     setRegForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  const fetchJsonWithTimeout = async (url: string, options: RequestInit, timeoutMs = 20000) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { ...options, signal: controller.signal });
+      const raw = await res.text();
+      let data: any = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        data = { error: raw || "Unexpected server response." };
+      }
+      return { res, data };
+    } catch (err: any) {
+      if (err?.name === "AbortError") {
+        throw new Error("Request timed out. Please try again.");
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
   const clearRegistrationForm = () => {
     setRegForm({ ...defaultRegForm });
     setOtpValue('');
@@ -642,12 +665,11 @@ export default function App() {
           }
         }
 
-        const res = await fetch('/api/otp/send', {
+        const { res, data } = await fetchJsonWithTimeout('/api/otp/send', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email: regForm.email })
         });
-        const data = await res.json();
         if (res.ok) {
           setInfo(data.message || 'OTP sent to your email.');
           setRegStep('otp');
@@ -931,12 +953,11 @@ export default function App() {
     setError('');
     setInfo('');
     try {
-      const res = await fetch('/api/password/forgot', {
+      const { res, data } = await fetchJsonWithTimeout('/api/password/forgot', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: forgotForm.email }),
       });
-      const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to send reset code');
       setForgotForm((prev) => ({ ...prev, step: 'reset' }));
       setInfo(data.message || 'Verification code sent.');
